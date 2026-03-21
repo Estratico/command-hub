@@ -1,0 +1,1 @@
+export const ALLOWED_DOMAIN = 'estratico.org.zw'

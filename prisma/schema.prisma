@@ -1,0 +1,253 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum ProjectStatus {
+  BACKLOG
+  IN_PROGRESS
+  DONE
+}
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+enum SubscriptionFrequency {
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model User {
+  id              String        @id @default(uuid())
+  name            String
+  email           String
+  emailVerified   Boolean       @default(false)
+  image           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  role            Role?         @default(MEMBER)
+  bio             String?
+  whatsappNumber  String?
+  sessions        Session[]
+  accounts        Account[]
+  teamMemberships TeamMember[]
+  invitationsSent TeamInvitation[]
+  projectsCreated Project[]
+  tasksAssigned   Task[]        @relation("AssignedTasks")
+  tasksCreated    Task[]        @relation("CreatedTasks")
+  syncLogs        SyncLog[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@index([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Team {
+  id          String           @id @default(uuid())
+  name        String
+  slug        String           @unique
+  logo        String
+  metadata    Json             @default("{}")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  members     TeamMember[]
+  invitations TeamInvitation[]
+  projects    Project[]
+  subscriptions subscription[]
+
+  @@map("team")
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("teamMember")
+}
+
+model TeamInvitation {
+  id         String           @id @default(uuid())
+  teamId     String
+  email      String
+  role       Role             @default(MEMBER)
+  invitedBy  String
+  status     InvitationStatus @default(PENDING)
+  expiresAt  DateTime
+  createdAt  DateTime         @default(now())
+  team       Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  inviter    User             @relation(fields: [invitedBy], references: [id])
+
+  @@map("teamInvitation")
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  teamId      String
+  name        String
+  description String
+  status      ProjectStatus @default(BACKLOG)
+  version     Int           @default(1)
+  createdBy   String
+  isDeleted   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  team        Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  creator     User          @relation(fields: [createdBy], references: [id])
+  tasks       Task[]
+
+  @@index([teamId])
+  @@index([status])
+  @@map("project")
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  projectId   String
+  title       String
+  description String
+  priority    TaskPriority @default(LOW)
+  status      TaskStatus   @default(BACKLOG)
+  assignedTo  String
+  createdBy   String
+  position    Int
+  dueDate     DateTime
+  isDeleted   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee    User         @relation("AssignedTasks", fields: [assignedTo], references: [id])
+  creator     User         @relation("CreatedTasks", fields: [createdBy], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([assignedTo])
+  @@map("task")
+}
+
+model subscription {
+  id              String                @id @default(uuid())
+  teamId          String
+  serviceName     String
+  provider        String
+  startDate       DateTime
+  lastPaymentDate DateTime
+  frequency       SubscriptionFrequency
+  cost            Float
+  currency        String                @default("USD")
+  notes           String
+  isActive        Boolean               @default(true)
+  version         Int                   @default(1)
+  isDeleted       Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  team            Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("subscription")
+}
+
+model SyncLog {
+  id        String   @id @default(uuid())
+  userId    String
+  tableName String
+  recordId  String
+  action    String
+  payload   Json
+  syncedAt  DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tableName, recordId])
+  @@map("syncLog")
+}
