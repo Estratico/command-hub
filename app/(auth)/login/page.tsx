@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState,Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { signIn } from '@/lib/auth-client'
@@ -55,7 +55,8 @@ export default function LoginPage() {
   },[searchParams])
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <Suspense fallback={<div>Loading...</div>}>
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
@@ -109,5 +110,6 @@ export default function LoginPage() {
         </form>
       </Card>
     </div>
+    </Suspense>
   )
 }
