@@ -169,7 +169,7 @@ export async function POST(request: Request) {
         );
         break;
       case "subscription":
-        console.log("sync subscriptions")
+        console.log("sync subscriptions");
         result = await handleSubscriptionSync(
           action,
           recordId,
@@ -247,7 +247,7 @@ async function handleTaskSync(
           assignedTo,
           position,
           dueDate: new Date(dueDate ?? ""),
-          createdBy:userId
+          createdBy: userId,
         },
       });
 
@@ -333,12 +333,7 @@ async function handleProjectSync(
                 ${payload.description as string | null}, ${(payload.status as string) || "active"}, ${userId})
         RETURNING *
       `; */
-      const {
-        teamId,
-        name,
-        description,
-        status,
-      } = payload as {
+      const { teamId, name, description, status } = payload as {
         teamId: string;
         name: string;
         description: string;
@@ -351,7 +346,7 @@ async function handleProjectSync(
           name,
           description,
           status,
-          createdBy:userId
+          createdBy: userId,
         },
       });
 
@@ -365,12 +360,7 @@ async function handleProjectSync(
         WHERE id = ${recordId}
         RETURNING *
       `; */
-       const {
-        teamId,
-        name,
-        description,
-        status,
-      } = payload as Partial<{
+      const { teamId, name, description, status } = payload as Partial<{
         teamId: string;
         name: string;
         description: string;
@@ -378,8 +368,8 @@ async function handleProjectSync(
       }>;
 
       const result = await prisma.project.update({
-        where:{
-          id:recordId
+        where: {
+          id: recordId,
         },
         data: {
           teamId,
@@ -394,10 +384,10 @@ async function handleProjectSync(
     case "delete":
       /* await sql`DELETE FROM projects WHERE id = ${recordId}`; */
       await prisma.project.delete({
-        where:{
-          id:recordId
-        }
-      })
+        where: {
+          id: recordId,
+        },
+      });
       return { id: recordId, deleted: true };
     default:
       throw new Error("Unknown action");
@@ -424,8 +414,12 @@ async function handleSubscriptionSync(
           cost: payload.cost,
           currency: payload.currency || "USD",
           frequency: payload.frequency as SubscriptionFrequency,
-          startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
-          lastPaymentDate: payload.lastPaymentDate ? new Date(payload.lastPaymentDate) : new Date(),
+          startDate: payload.startDate
+            ? new Date(payload.startDate)
+            : new Date(),
+          lastPaymentDate: payload.lastPaymentDate
+            ? new Date(payload.lastPaymentDate)
+            : new Date(),
           notes: payload.notes || "",
           isActive: payload.status !== "inactive",
         },
@@ -469,13 +463,21 @@ async function handleTeamSync(
   switch (action) {
     case "create": {
       /**
-       * Using a Nested Write: 
-       * This creates the Team and the TeamMember (Owner) in a single 
+       * Using a Nested Write:
+       * This creates the Team and the TeamMember (Owner) in a single
        * atomic database transaction.
        */
-      return await prisma.team.create({
-        data: {
-          id: id,
+      return await prisma.team.upsert({
+        where:{
+          slug:payload.slug
+        },
+        update:{
+          name: payload.name,
+          slug: payload.slug,
+          logo: payload.logo || "",
+          metadata: payload.metadata || {},
+        },
+        create: {
           name: payload.name,
           slug: payload.slug,
           logo: payload.logo || "",
@@ -508,8 +510,8 @@ async function handleTeamSync(
 
     case "delete":
       /**
-       * Because your schema now has 'onDelete: Cascade' on the 
-       * TeamMember -> Team relation, deleting the team will 
+       * Because your schema now has 'onDelete: Cascade' on the
+       * TeamMember -> Team relation, deleting the team will
        * automatically delete all its members.
        */
       await prisma.team.delete({

@@ -71,6 +71,7 @@ export class SyncEngine {
         .toArray()
 
       for (const item of pendingItems) {
+        console.log("item:", item)
         try {
           const response = await fetch(SYNC_ENDPOINT, {
             method: 'POST',
@@ -104,8 +105,9 @@ export class SyncEngine {
               await offlineDb.syncQueue.delete(item.id)
             }
           }
-        } catch {
+        } catch(e) {
           // Network error - increment retry count
+          console.error(e)
           if (item.id) {
             await offlineDb.syncQueue.update(item.id, { retries: item.retries + 1 })
           }
@@ -118,14 +120,35 @@ export class SyncEngine {
   }
 
   private async updateLocalEntity(
-    entityType: string, 
-    entityId: string, 
+    tableName: string, 
+    recordId: string, 
     serverData: Record<string, unknown>
   ) {
-    const table = offlineDb.table(entityType + 's')
-    if (table) {
-      await table.update(entityId, { ...serverData, synced: true, pendingSync: false })
+    const table = offlineDb.table(tableName + 's')
+    await offlineDb.transaction('rw', table, async () => {
+    // 1. Check if the server returned a new ID
+    const newId = serverData.id;
+
+    if (newId && newId !== recordId) {
+      // 2. Delete the temporary offline record first
+      // This "frees up" the 'command' slug in the unique index
+      await table.delete(recordId);
+
+      // 3. Add the server record as a fresh entry
+      await table.put({
+        ...serverData,
+        synced: true,
+        pendingSync: false
+      });
+    } else {
+      // 4. If IDs are the same, a simple update works
+      await table.update(recordId, { 
+        ...serverData, 
+        synced: true, 
+        pendingSync: false 
+      });
     }
+  });
   }
 
   async pullChanges(lastSyncTimestamp?: string) {

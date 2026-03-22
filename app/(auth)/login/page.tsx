@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { signIn } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,13 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
+  const [callbackUrl,setCallbackUrl] = useState("/");
+
+  const searchParams = useSearchParams()
+
+
+
+  async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
     setIsLoading(true)
@@ -25,7 +31,8 @@ export default function LoginPage() {
     try {
       const result = await signIn.email({
         email,
-        password
+        password,
+        callbackURL:callbackUrl
       })
 
       if (result.error) {
@@ -39,6 +46,13 @@ export default function LoginPage() {
       setIsLoading(false)
     }
   }
+
+  useEffect(()=>{
+    const cbUrl = searchParams.get("callbackUrl");
+    if(cbUrl){
+      setCallbackUrl(cbUrl)
+    }
+  },[searchParams])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">

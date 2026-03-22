@@ -27,10 +27,6 @@ export async function POST(request: Request) {
     }
 
     // Check if user has permission to invite
-    /* const membership = await sql`
-      SELECT role FROM team_members
-      WHERE team_id = ${teamId} AND user_id = ${session.user.id}
-    ` */
 
     const membership = await prisma.teamMember.findFirst({
       where: {
@@ -60,11 +56,6 @@ export async function POST(request: Request) {
     }
 
     // Check if user is already a member
-    /* const existingUser = await sql`
-      SELECT u.id FROM users u
-      JOIN team_members tm ON tm.user_id = u.id
-      WHERE u.email = ${email} AND tm.team_id = ${teamId}
-    ` */
 
     const existingUser = await prisma.user.findFirst({
       where: {
@@ -88,10 +79,6 @@ export async function POST(request: Request) {
     }
 
     // Check for existing pending invitation
-    /* const existingInvitation = await sql`
-      SELECT id FROM team_invitations
-      WHERE team_id = ${teamId} AND email = ${email} AND status = 'pending'
-    ` */
 
     const existingInvitation = await prisma.teamInvitation.findFirst({
       where: {
@@ -112,11 +99,7 @@ export async function POST(request: Request) {
     }
 
     // Create invitation
-    /*  const invitation = await sql`
-      INSERT INTO team_invitations (team_id, email, role, invited_by)
-      VALUES (${teamId}, ${email}, ${role}, ${session.user.id})
-      RETURNING *
-    ` */
+
     const invitation = await prisma.teamInvitation.create({
       data: {
         teamId,
@@ -128,7 +111,6 @@ export async function POST(request: Request) {
     });
 
     // In production, send email here
-    console.log(`Invitation sent to ${email} for team ${teamId}`);
 
     const { data, error } = await resend.emails.send({
       from: `Estratico <${session.user.email}>`,
@@ -139,7 +121,7 @@ export async function POST(request: Request) {
         data: {
           invitedBy: session.user.name,
           teamName: membership.team.name,
-          inviteLink: `${process.env.BETTER_AUTH_URL}/api/teams/invite/${invitation.id}`,
+          inviteLink: `${process.env.BETTER_AUTH_URL}/invite/${invitation.id}`,
         },
       }),
     });
