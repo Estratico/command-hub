@@ -10,21 +10,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Team } from "@/lib/db";
+import type { Team } from "@/app/generated/prisma/client";
 import prisma from "@/lib/prisma";
 import { InvitationStatus, Role } from "@/app/generated/prisma/enums";
 
 interface TeamPageProps {
   params: Promise<{ id: string }>;
-}
-
-interface TeamMember {
-  id: string;
-  user_id: string;
-  name: string;
-  email: string;
-  role: "owner" | "admin" | "member";
-  joined_at: string;
 }
 
 async function getTeamData(teamId: string, userId: string) {
