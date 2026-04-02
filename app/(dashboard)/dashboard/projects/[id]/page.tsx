@@ -93,8 +93,8 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   const { project, tasks, teamMembers } = data
 
   return (
-    <div className="flex flex-col gap-6 h-full">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-6 h-full min-w-0">
+      <div className="flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">{project.name}</h1>
           <p className="text-muted-foreground">{project.team_name}</p>
@@ -102,11 +102,13 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
         <CreateTaskDialog projectId={project.id} teamMembers={teamMembers} />
       </div>
 
-      <KanbanBoard 
-        projectId={project.id} 
-        initialTasks={tasks} 
-        teamMembers={teamMembers}
-      />
+      <div className="flex-1 overflow-hidden min-w-0">
+        <KanbanBoard
+          projectId={project.id}
+          initialTasks={tasks}
+          teamMembers={teamMembers}
+        />
+      </div>
     </div>
   )
 }

@@ -97,7 +97,7 @@ export default async function SubscriptionsPage() {
 
       <SubscriptionStats stats={stats} />
 
-      <SubscriptionsList subscriptions={subscriptions} />
+      <SubscriptionsList subscriptions={subscriptions} teams={teams} />
     </div>
   )
 }
