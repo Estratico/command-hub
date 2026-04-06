@@ -405,12 +405,13 @@ async function handleSubscriptionSync(
 
   switch (action) {
     case "create": {
+      console.log("Payload: ", payload);
       return await prisma.subscription.create({
         data: {
           id: id,
           teamId: payload.teamId,
-          serviceName: payload.name, // mapped from 'name'
-          provider: payload.provider, // mapped from 'provider'
+          serviceName: payload.serviceName,
+          provider: payload.provider,
           cost: payload.cost,
           currency: payload.currency || "USD",
           frequency: payload.frequency as SubscriptionFrequency,
@@ -421,22 +422,25 @@ async function handleSubscriptionSync(
             ? new Date(payload.lastPaymentDate)
             : new Date(),
           notes: payload.notes || "",
-          isActive: payload.status !== "inactive",
+          isActive: payload.isActive,
         },
       });
     }
 
     case "update": {
+      const { teamId, team, team_name, status, ...data } = payload;
+      console.log("Data: ", data);
       return await prisma.subscription.update({
         where: { id: recordId },
         data: {
-          serviceName: payload.name,
-          provider: payload.provider,
-          cost: payload.cost,
-          currency: payload.currency,
-          frequency: payload.billingCycle as SubscriptionFrequency,
-          isActive: payload.status !== "inactive",
-          notes: payload.notes,
+          ...data,
+          notes: data.notes || "",
+          version: data.version + 1,
+          cost: Number(data.cost),
+          startDate: data.startDate ? new Date(data.startDate) : undefined,
+          lastPaymentDate: data.lastPaymentDate
+            ? new Date(data.lastPaymentDate)
+            : undefined,
         },
       });
     }
@@ -468,10 +472,10 @@ async function handleTeamSync(
        * atomic database transaction.
        */
       return await prisma.team.upsert({
-        where:{
-          slug:payload.slug
+        where: {
+          slug: payload.slug,
         },
-        update:{
+        update: {
           name: payload.name,
           slug: payload.slug,
           logo: payload.logo || "",

@@ -1,333 +1,508 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { FieldGroup, Field, FieldLabel, FieldError } from '@/components/ui/field'
-import { Spinner } from '@/components/ui/spinner'
-import { offlineDb, generateOfflineId } from '@/lib/offline-db'
-import { syncEngine } from '@/lib/sync-engine'
-import type { SubscriptionFrequency, Team, subscription } from '@/app/generated/prisma/client'
+import { useEffect, useCallback } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
-interface SubscriptionFormData {
-  serviceName: string
-  provider: string
-  cost: string
-  frequency: SubscriptionFrequency
-  teamId: string
-  version: string
-  lastPaymentDate: string
-  startDate: string
-  notes: string
-}
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  FormDescription,
+} from "@/components/ui/form";
+import { Spinner } from "@/components/ui/spinner";
+import { offlineDb, generateOfflineId } from "@/lib/offline-db";
+import { syncEngine } from "@/lib/sync-engine";
+import type {
+  SubscriptionFrequency,
+  Team,
+  subscription,
+} from "@/app/generated/prisma/client";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const SUBSCRIPTION_FREQUENCIES: readonly SubscriptionFrequency[] = [
+  "WEEKLY",
+  "FORTNIGHTLY",
+  "MONTHLY",
+  "QUARTERLY",
+  "YEARLY",
+] as const;
+
+const FREQUENCY_LABELS: Record<SubscriptionFrequency, string> = {
+  WEEKLY: "Weekly",
+  FORTNIGHTLY: "Fortnightly",
+  MONTHLY: "Monthly",
+  QUARTERLY: "Quarterly",
+  YEARLY: "Yearly",
+};
+
+const DEFAULT_CURRENCY = "USD";
+
+// ============================================================================
+// Schema & Types
+// ============================================================================
+
+const subscriptionFormSchema = z.object({
+  serviceName: z
+    .string()
+    .min(1, "Service name is required")
+    .max(100, "Service name must be less than 100 characters")
+    .transform((val) => val.trim()),
+  provider: z
+    .string()
+    .min(1, "Provider is required")
+    .max(100, "Provider must be less than 100 characters")
+    .transform((val) => val.trim()),
+  cost: z
+    .string()
+    .min(1, "Cost is required")
+    .refine((val) => !isNaN(Number(val)) && Number(val) >= 0, {
+      message: "Cost must be a valid positive number",
+    })
+    .transform((val) => Number(val)),
+  frequency: z.enum([
+    "WEEKLY",
+    "FORTNIGHTLY",
+    "MONTHLY",
+    "QUARTERLY",
+    "YEARLY",
+  ]),
+  teamId: z.string().min(1, "Please select a team"),
+  startDate: z.string().min(1, "Start date is required"),
+  lastPaymentDate: z.string().optional(),
+  notes: z
+    .string()
+    .max(500, "Notes must be less than 500 characters")
+    .optional()
+    .transform((val) => val?.trim() || ""),
+  version: z.number().int().positive().default(1),
+});
+
+type SubscriptionFormValues = z.input<typeof subscriptionFormSchema>;
+type SubscriptionFormOutput = z.output<typeof subscriptionFormSchema>;
 
 interface SubscriptionFormProps {
-  teams: (Team & { role: string })[]
-  initialData?: subscription & { team_name: string }
-  onSuccess: () => void
-  onCancel: () => void
-  onSubmitting?: (submitting: boolean) => void
+  teams: (Team & { role: string })[];
+  initialData?: subscription & { team_name: string };
+  onSuccess: () => void;
+  onCancel: () => void;
+  onSubmitting?: (submitting: boolean) => void;
 }
 
-const CATEGORIES = [
-  'Infrastructure',
-  'Development Tools',
-  'Design',
-  'Marketing',
-  'Communication',
-  'Analytics',
-  'Security',
-  'Other'
-] as const
+// ============================================================================
+// Utilities
+// ============================================================================
 
-const SUBSCRIPTION_FREQUENCIES: Record<SubscriptionFrequency, SubscriptionFrequency> = {
-  WEEKLY: "WEEKLY",
-  FORTNIGHTLY: "FORTNIGHTLY",
-  MONTHLY: "MONTHLY",
-  QUARTERLY: "QUARTERLY",
-  YEARLY: "YEARLY",
-} as const
-
-const DEFAULT_FORM_DATA: SubscriptionFormData = {
-  serviceName: '',
-  provider: '',
-  cost: '',
-  frequency: "MONTHLY",
-  teamId: '',
-  version: "1",
-  lastPaymentDate: '',
-  startDate: '',
-  notes: ''
+function formatDateForInput(date: Date | string | null | undefined): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  return d.toISOString().split("T")[0];
 }
 
-function parseFormData(formData: SubscriptionFormData) {
+function getDefaultValues(
+  initialData?: subscription & { team_name: string },
+): SubscriptionFormValues {
+  if (initialData) {
+    return {
+      serviceName: initialData.serviceName,
+      provider: initialData.provider,
+      cost: String(initialData.cost),
+      frequency: initialData.frequency,
+      teamId: initialData.teamId,
+      startDate: formatDateForInput(initialData.startDate),
+      lastPaymentDate: formatDateForInput(initialData.lastPaymentDate),
+      notes: initialData.notes ?? "",
+      version: initialData.version,
+    };
+  }
+
   return {
-    ...formData,
-    cost: Number(formData.cost),
-    version: parseInt(formData.version) || 1,
-  }
+    serviceName: "",
+    provider: "",
+    cost: "",
+    frequency: "MONTHLY",
+    teamId: "",
+    startDate: "",
+    lastPaymentDate: "",
+    notes: "",
+    version: 1,
+  };
 }
 
-function formatDbDate(date: Date | string): string {
-  if (typeof date === 'string') return date.split('T')[0]
-  return date.toISOString().split('T')[0]
-}
+// ============================================================================
+// Component
+// ============================================================================
 
-export function SubscriptionForm({ teams, initialData, onSuccess, onCancel, onSubmitting }: SubscriptionFormProps) {
-  const [formData, setFormData] = useState<SubscriptionFormData>(DEFAULT_FORM_DATA)
-  const [error, setError] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+export function SubscriptionForm({
+  teams,
+  initialData,
+  onSuccess,
+  onCancel,
+  onSubmitting,
+}: SubscriptionFormProps) {
+  const isEditMode = !!initialData;
 
-  const isEditMode = !!initialData
+  const form = useForm({
+    resolver: zodResolver(subscriptionFormSchema),
+    defaultValues: getDefaultValues(initialData),
+    mode: "onBlur",
+  });
 
+  const {
+    handleSubmit,
+    reset,
+    formState: { isSubmitting, errors },
+  } = form;
+
+  // Reset form when initialData changes
   useEffect(() => {
-    if (initialData) {
-      setFormData({
-        serviceName: initialData.serviceName,
-        provider: initialData.provider,
-        cost: String(initialData.cost),
-        frequency: initialData.frequency,
-        teamId: initialData.teamId,
-        version: String(initialData.version),
-        lastPaymentDate: formatDbDate(initialData.lastPaymentDate),
-        startDate: formatDbDate(initialData.startDate),
-        notes: initialData.notes ?? ''
-      })
-    }
-  }, [initialData])
+    reset(getDefaultValues(initialData));
+  }, [initialData, reset]);
 
-  function updateField<K extends keyof SubscriptionFormData>(field: K, value: SubscriptionFormData[K]) {
-    setFormData(prev => ({ ...prev, [field]: value }))
-  }
+  // Notify parent of submitting state changes
+  useEffect(() => {
+    onSubmitting?.(isSubmitting);
+  }, [isSubmitting, onSubmitting]);
 
-  function resetForm() {
-    setFormData(DEFAULT_FORM_DATA)
-    setError('')
-  }
+  const onSubmit = useCallback(
+    async (data: SubscriptionFormOutput) => {
+      const now = new Date().toISOString();
+      const effectiveLastPaymentDate = data.lastPaymentDate || data.startDate;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
+      try {
+        if (isEditMode && initialData) {
+          // Update existing subscription
+          await offlineDb.subscriptions.update(initialData.id, {
+            serviceName: data.serviceName,
+            provider: data.provider,
+            cost: data.cost,
+            frequency: data.frequency,
+            teamId: data.teamId,
+            startDate: data.startDate,
+            lastPaymentDate: effectiveLastPaymentDate,
+            notes: data.notes,
+            version: data.version,
+            updatedAt: now,
+            pendingSync: true,
+          });
 
-    // Validation
-    if (!formData.serviceName.trim()) {
-      setError('Subscription name is required')
-      return
-    }
-    if (!formData.startDate.trim()) {
-      setError('Start date is required')
-      return
-    }
-    if (!formData.provider.trim()) {
-      setError('Provider is required')
-      return
-    }
-    if (!formData.cost || isNaN(Number(formData.cost)) || Number(formData.cost) < 0) {
-      setError('Please enter a valid cost')
-      return
-    }
-    if (!formData.teamId) {
-      setError('Please select a team')
-      return
-    }
+          if (syncEngine) {
+            await syncEngine.queueChange({
+              tableName: "subscription",
+              recordId: initialData.id,
+              action: "update",
+              payload: {
+                serviceName: data.serviceName,
+                provider: data.provider,
+                cost: data.cost,
+                frequency: data.frequency,
+                teamId: data.teamId,
+                startDate: data.startDate,
+                lastPaymentDate: effectiveLastPaymentDate,
+                notes: data.notes || null,
+                version: data.version,
+              },
+            });
+          }
+        } else {
+          // Create new subscription
+          const subscriptionId = generateOfflineId();
 
-    setIsLoading(true)
-    onSubmitting?.(true)
+          await offlineDb.subscriptions.add({
+            id: subscriptionId,
+            teamId: data.teamId,
+            startDate: data.startDate,
+            notes: data.notes,
+            serviceName: data.serviceName,
+            provider: data.provider,
+            cost: data.cost,
+            currency: DEFAULT_CURRENCY,
+            frequency: data.frequency,
+            lastPaymentDate: effectiveLastPaymentDate,
+            isActive: true,
+            version: data.version,
+            isDeleted: false,
+            createdAt: now,
+            updatedAt: now,
+            synced: false,
+            pendingSync: true,
+          });
 
-    try {
-      const parsed = parseFormData(formData)
-      const now = new Date().toISOString()
-
-      if (isEditMode && initialData) {
-        // Update existing subscription
-        await offlineDb.subscriptions.update(initialData.id, {
-          ...parsed,
-          updatedAt: now,
-          pendingSync: true
-        })
-
-        if (syncEngine) {
-          await syncEngine.queueChange({
-            tableName: 'subscription',
-            recordId: initialData.id,
-            action: 'update',
-            payload: {
-              ...parsed,
-              lastPaymentDate: parsed.lastPaymentDate || parsed.startDate
-            }
-          })
+          if (syncEngine) {
+            await syncEngine.queueChange({
+              tableName: "subscription",
+              recordId: subscriptionId,
+              action: "create",
+              payload: {
+                teamId: data.teamId,
+                serviceName: data.serviceName,
+                provider: data.provider,
+                cost: data.cost,
+                currency: DEFAULT_CURRENCY,
+                frequency: data.frequency,
+                lastPaymentDate: effectiveLastPaymentDate,
+                isActive: true,
+                version: data.version,
+                notes: data.notes || null,
+              },
+            });
+          }
         }
-      } else {
-        // Create new subscription
-        const subscriptionId = generateOfflineId()
 
-        await offlineDb.subscriptions.add({
-          id: subscriptionId,
-          teamId: parsed.teamId,
-          startDate: parsed.startDate,
-          notes: parsed.notes,
-          serviceName: parsed.serviceName.trim(),
-          provider: parsed.provider.trim(),
-          cost: parsed.cost,
-          currency: 'USD',
-          frequency: parsed.frequency,
-          lastPaymentDate: parsed.lastPaymentDate || parsed.startDate,
-          isActive: true,
-          version: parsed.version,
-          isDeleted: false,
-          createdAt: now,
-          updatedAt: now,
-          synced: false,
-          pendingSync: true
-        })
-
-        if (syncEngine) {
-          await syncEngine.queueChange({
-            tableName: 'subscription',
-            recordId: subscriptionId,
-            action: 'create',
-            payload: {
-              teamId: parsed.teamId,
-              serviceName: parsed.serviceName.trim(),
-              provider: parsed.provider.trim(),
-              cost: parsed.cost,
-              currency: 'USD',
-              frequency: parsed.frequency,
-              lastPaymentDate: parsed.lastPaymentDate || parsed.startDate,
-              isActive: true,
-              version: parsed.version,
-              notes: parsed.notes || null
-            }
-          })
-        }
+        reset(getDefaultValues());
+        onSuccess();
+      } catch (error) {
+        // Set form-level error
+        form.setError("root", {
+          type: "manual",
+          message: `Failed to ${isEditMode ? "update" : "create"} subscription. Please try again.`,
+        });
+        console.error("Subscription form error:", error);
       }
-
-      resetForm()
-      onSuccess()
-    } catch {
-      setError(`Failed to ${isEditMode ? 'update' : 'create'} subscription`)
-    } finally {
-      setIsLoading(false)
-      onSubmitting?.(false)
-    }
-  }
+    },
+    [isEditMode, initialData, reset, onSuccess, form],
+  );
 
   if (teams.length === 0) {
     return (
       <Button disabled>
-        {isEditMode ? 'Edit Subscription' : 'Add Subscription'}
+        {isEditMode ? "Edit Subscription" : "Add Subscription"}
       </Button>
-    )
+    );
   }
 
   return (
-    <form id="subscription-form" onSubmit={handleSubmit}>
-      <FieldGroup className="py-4 max-h-[60vh] overflow-y-auto">
-        <Field>
-          <FieldLabel htmlFor="serviceName">Service name</FieldLabel>
-          <Input
-            id="serviceName"
-            value={formData.serviceName}
-            onChange={(e) => updateField('serviceName', e.target.value)}
-            placeholder="e.g., GitHub Enterprise"
+    <Form {...form}>
+      <form
+        id="subscription-form"
+        onSubmit={handleSubmit((data) =>
+          onSubmit({
+            ...data,
+            cost: Number(data.cost),
+            notes: data.notes ?? "",
+            version: data.version ?? 1,
+          }),
+        )}
+        className="space-y-6"
+        noValidate
+      >
+        <div className="max-h-[60vh] space-y-5 overflow-y-auto py-4 pr-2">
+          {/* Service Name */}
+          <FormField
+            control={form.control}
+            name="serviceName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Service name</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g., GitHub Enterprise" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
           />
-        </Field>
 
-        <Field>
-          <FieldLabel htmlFor="provider">Provider</FieldLabel>
-          <Input
-            id="provider"
-            value={formData.provider}
-            onChange={(e) => updateField('provider', e.target.value)}
-            placeholder="e.g., GitHub"
+          {/* Provider */}
+          <FormField
+            control={form.control}
+            name="provider"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Provider</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g., GitHub" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
           />
-        </Field>
 
-        <Field>
-          <FieldLabel htmlFor="startDate">Start Date</FieldLabel>
-          <Input
-            id="startDate"
-            type="date"
-            value={formData.startDate}
-            onChange={(e) => updateField('startDate', e.target.value)}
-          />
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor="lastPaymentDate">Last Payment Date</FieldLabel>
-          <Input
-            id="lastPaymentDate"
-            type="date"
-            value={formData.lastPaymentDate}
-            onChange={(e) => updateField('lastPaymentDate', e.target.value)}
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-4">
-          <Field>
-            <FieldLabel htmlFor="cost">Cost</FieldLabel>
-            <Input
-              id="cost"
-              type="number"
-              min="0"
-              step="0.01"
-              value={formData.cost}
-              onChange={(e) => updateField('cost', e.target.value)}
-              placeholder="0.00"
+          {/* Dates Row */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField
+              control={form.control}
+              name="startDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Start date</FormLabel>
+                  <FormControl>
+                    <Input type="date" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-          </Field>
 
-          <Field>
-            <FieldLabel htmlFor="frequency">Frequency</FieldLabel>
-            <Select
-              value={formData.frequency}
-              onValueChange={(v: SubscriptionFrequency) => updateField('frequency', v)}
+            <FormField
+              control={form.control}
+              name="lastPaymentDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Last payment date</FormLabel>
+                  <FormControl>
+                    <Input type="date" {...field} />
+                  </FormControl>
+                  <FormDescription className="text-xs">
+                    Defaults to start date if empty
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {/* Cost & Frequency Row */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField
+              control={form.control}
+              name="cost"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Cost ({DEFAULT_CURRENCY})</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="frequency"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Billing frequency</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select frequency" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {SUBSCRIPTION_FREQUENCIES.map((freq) => (
+                        <SelectItem key={freq} value={freq}>
+                          {FREQUENCY_LABELS[freq]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {/* Team Selection */}
+          <FormField
+            control={form.control}
+            name="teamId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Team</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                  value={field.value}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a team" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {teams.map((team) => (
+                      <SelectItem key={team.id} value={team.id}>
+                        {team.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Notes */}
+          <FormField
+            control={form.control}
+            name="notes"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>
+                  Notes{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder="Add any additional notes about this subscription..."
+                    rows={3}
+                    className="resize-none"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Form-level Error */}
+          {errors.root && (
+            <div
+              role="alert"
+              className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Select frequency" />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.values(SUBSCRIPTION_FREQUENCIES).map((freq) => (
-                  <SelectItem key={freq} value={freq} className="capitalize">
-                    {freq.toLowerCase()}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+              {errors.root.message}
+            </div>
+          )}
         </div>
 
-        <Field>
-          <FieldLabel htmlFor="team">Team</FieldLabel>
-          <Select value={formData.teamId} onValueChange={(v) => updateField('teamId', v)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a team" />
-            </SelectTrigger>
-            <SelectContent>
-              {teams.map((team) => (
-                <SelectItem key={team.id} value={team.id}>
-                  {team.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor="notes">Notes (optional)</FieldLabel>
-          <Textarea
-            id="notes"
-            value={formData.notes}
-            onChange={(e) => updateField('notes', e.target.value)}
-            placeholder="Add any additional notes"
-            rows={2}
-          />
-        </Field>
-
-        {error && <FieldError>{error}</FieldError>}
-      </FieldGroup>
-    </form>
-  )
+        {/* Form Actions */}
+        <div className="flex justify-end gap-3 border-t pt-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Spinner className="mr-2 size-4" />}
+            {isEditMode ? "Update Subscription" : "Add Subscription"}
+          </Button>
+        </div>
+      </form>
+    </Form>
+  );
 }
