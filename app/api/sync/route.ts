@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import {
+  Prisma,
   Project,
   ProjectStatus,
   Role,
@@ -340,14 +341,20 @@ async function handleProjectSync(
         status: ProjectStatus;
       };
 
-      const result = await prisma.project.create({
-        data: {
-          teamId,
-          name,
-          description,
-          status,
-          createdBy: userId,
+      const projectData: Prisma.ProjectCreateInput = {
+        name,
+        description,
+        status,
+        creator: { connect: { id: userId } },
+        team: {
+          connect: {
+            id: teamId,
+          },
         },
+      };
+
+      const result = await prisma.project.create({
+        data: projectData,
       });
 
       return result;
